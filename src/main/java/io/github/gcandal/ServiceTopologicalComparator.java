@@ -2,10 +2,10 @@ package io.github.gcandal;
 
 import java.util.Comparator;
 
-public class NodeTopologicalComparator implements Comparator<Node> {
+public class ServiceTopologicalComparator implements Comparator<Service> {
 
     @Override
-    public int compare(Node x, Node y) {
+    public int compare(Service x, Service y) {
         if(x == null && y == null) {
             return 0;
         }

@@ -13,17 +13,17 @@ import java.io.IOException;
 import java.util.*;
 
 
-public class GraphTest
+public class ServiceManagerTest
 {
     @Test
-    public void testGraph() throws IOException {
-        Graph graph = new Graph("services.txt");
+    public void testServiceManager() throws IOException {
+        ServiceManager serviceManager = new ServiceManager("services.txt");
 
-        Node a = graph.getNode("a"),
-            b = graph.getNode("b"),
-            c = graph.getNode("c"),
-            d = graph.getNode("d"),
-            e = graph.getNode("e");
+        Service a = serviceManager.getService("a"),
+            b = serviceManager.getService("b"),
+            c = serviceManager.getService("c"),
+            d = serviceManager.getService("d"),
+            e = serviceManager.getService("e");
 
         assertEquals(2, a.getIndegree());
         assertEquals(1, b.getIndegree());
@@ -31,7 +31,7 @@ public class GraphTest
         assertEquals(0, d.getIndegree());
         assertEquals(0, e.getIndegree());
 
-        Set<Node> expectedDependencies = new HashSet<>();
+        Set<Service> expectedDependencies = new HashSet<>();
         assertThat(a.getDependencies(), is(expectedDependencies));
 
         expectedDependencies.add(a);
@@ -46,7 +46,7 @@ public class GraphTest
         expectedDependencies.clear();
         assertThat(e.getDependencies(), is(expectedDependencies));
 
-        List<Node> topologicalOrder = new LinkedList<>(graph.getTopologicalOrder());
+        List<Service> topologicalOrder = new LinkedList<>(serviceManager.getTopologicalOrder());
         int aOrder = topologicalOrder.indexOf(a),
             bOrder = topologicalOrder.indexOf(b),
             cOrder = topologicalOrder.indexOf(c),
@@ -58,15 +58,24 @@ public class GraphTest
         assertTrue(bOrder < dOrder);
         assertTrue(dOrder == eOrder - 1 || dOrder == eOrder + 1);
 
-        assertThat(a.getParentLatches(), hasItems(b.getOwnLatch(), c.getOwnLatch()));
-        assertThat(b.getParentLatches(), hasItems(d.getOwnLatch()));
-        assertThat(c.getParentLatches(), hasItems(d.getOwnLatch()));
+        assertThat(a.getParentLatches(), hasItems(b.getStartLatch(), c.getStartLatch()));
+        assertEquals(0, a.getChildrenLatches().size());
+
+        assertThat(b.getParentLatches(), hasItems(d.getStartLatch()));
+        assertThat(b.getChildrenLatches(), hasItems(a.getStopLatch()));
+
+        assertThat(c.getParentLatches(), hasItems(d.getStartLatch()));
+        assertThat(c.getChildrenLatches(), hasItems(a.getStopLatch()));
+
         assertEquals(0, d.getParentLatches().size());
+        assertThat(d.getChildrenLatches(), hasItems(b.getStopLatch(), c.getStopLatch()));
+
         assertEquals(0, e.getParentLatches().size());
+        assertEquals(0, e.getChildrenLatches().size());
     }
 
     @Test(expected = RuntimeException.class)
-    public void testCyclicGraph() throws IOException {
-        new Graph("cyclic_services.txt");
+    public void testCyclicServiceManager() throws IOException {
+        new ServiceManager("cyclic_services.txt");
     }
 }

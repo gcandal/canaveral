@@ -16,7 +16,7 @@ import java.util.*;
 public class ServiceManagerTest
 {
     @Test
-    public void testServiceManager() throws IOException {
+    public void testInitServiceManager() throws IOException {
         ServiceManager serviceManager = new ServiceManager("services.txt");
 
         Service a = serviceManager.getService("a"),
@@ -59,19 +59,14 @@ public class ServiceManagerTest
         assertTrue(dOrder == eOrder - 1 || dOrder == eOrder + 1);
 
         assertThat(a.getParentLatches(), hasItems(b.getStartLatch(), c.getStartLatch()));
-        assertEquals(0, a.getChildrenLatches().size());
 
         assertThat(b.getParentLatches(), hasItems(d.getStartLatch()));
-        assertThat(b.getChildrenLatches(), hasItems(a.getStopLatch()));
 
         assertThat(c.getParentLatches(), hasItems(d.getStartLatch()));
-        assertThat(c.getChildrenLatches(), hasItems(a.getStopLatch()));
 
         assertEquals(0, d.getParentLatches().size());
-        assertThat(d.getChildrenLatches(), hasItems(b.getStopLatch(), c.getStopLatch()));
 
         assertEquals(0, e.getParentLatches().size());
-        assertEquals(0, e.getChildrenLatches().size());
     }
 
     @Test(expected = RuntimeException.class)

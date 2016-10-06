@@ -4,33 +4,39 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class ServiceManager {
+public class ServiceManager implements Runnable {
+    final BlockingQueue<String> queue = new LinkedBlockingQueue<>();
+    private volatile boolean terminate = false;
+    private static final Logger LOGGER = Logger.getLogger(ServiceManager.class.getName());
     private Map<String, Service> services = new HashMap<>();
     private PriorityQueue<Service> topologicalOrder = new PriorityQueue<>(new ServiceTopologicalComparator());
 
-    ServiceManager(String fileName) throws IOException {
+    ServiceManager(String fileName) throws IOException, RuntimeException {
+        LOGGER.info("Initializing Service Manager...");
+        LOGGER.info("Reading dependencies from " + fileName + "...");
         try (Stream<String> stream = Files.lines(Paths.get(fileName))) {
             stream.forEach(this::addServices);
         }
+        LOGGER.info("Checking for cycles in dependencies...");
         if(!isAcyclic()) {
-            throw new RuntimeException();
+            throw new RuntimeException("Dependencies read from " + fileName + " are cyclic.");
         }
         services.values().forEach(service -> topologicalOrder.add(service));
+        LOGGER.info("Initiating latches...");
         initiateLatches();
     }
 
     private void initiateLatches() {
         services.values().forEach(Service::initiateLatches);
         services.values().forEach(
-                parent -> parent.getDependencies().forEach(
-                        child -> {
-                            child.addParentLatch(parent.getStartLatch());
-                            parent.addChildLatch(child.getStopLatch());
-                        }
-                )
+                parent -> parent.getDependencies()
+                    .forEach(child -> child.addParentLatch(parent.getStartLatch()))
         );
     }
 
@@ -48,14 +54,14 @@ public class ServiceManager {
     }
 
     private void addService(String parentId, List<String> childrenIds) {
-        Service defaultService = new Service(parentId);
+        Service defaultService = new SleepingService(parentId);
         Service source = services.getOrDefault(parentId, defaultService);
         Stream<Service> sinksStream = childrenIds.stream()
-                .map(id -> services.getOrDefault(id, new Service(id)));
+                .map(id -> services.getOrDefault(id, new SleepingService(id)));
         List<Service> sinks = sinksStream.collect(Collectors.toList());
         source.addDependencies(sinks);
         services.putIfAbsent(parentId, source);
-        sinks.forEach(service -> services.putIfAbsent(service.getId(), service));
+        sinks.forEach(service -> services.putIfAbsent(service.getServiceId(), service));
     }
 
     private boolean isAcyclic() {
@@ -127,10 +133,88 @@ public class ServiceManager {
     }
 
     private void runAll() {
-        getSources().forEach(Service::requestStart);
+        LOGGER.info("Starting all services...");
+        getSources().forEach(Service::start);
+    }
+
+    private void runService(String serviceId) {
+        LOGGER.info("Starting service" + serviceId + " ...");
+        Service service = services.get(serviceId);
+        if(service == null) {
+            LOGGER.warning("Service " + serviceId + " doesn't exist.");
+            return;
+        }
+        service.start();
+    }
+
+    private void stopService(String serviceId) {
+        LOGGER.info("Stopping service" + serviceId + " ...");
+        Service service = services.get(serviceId);
+        if(service == null) {
+            LOGGER.warning("Service " + serviceId + " doesn't exist.");
+            return;
+        }
+        service.interrupt();
     }
 
     private void stopAll() {
-        getSinks().forEach(Service::requestStop);
+        Set<Service> sinks = getSinks();
+        LOGGER.info("Stopping services: " + sinks);
+        sinks.forEach(Service::interrupt);
+        LOGGER.info("All running services stopped");
+    }
+
+    private void terminate() {
+        LOGGER.info("Waiting for running services before terminating...");
+        for(Service service: services.values()) {
+            try {
+                service.join();
+            } catch (InterruptedException e) {
+                LOGGER.warning("Termination was forced before all services could be stopped");
+                return;
+            }
+        }
+        terminate = true;
+        LOGGER.info("Terminated");
+    }
+
+    @Override
+    public void run() {
+        LOGGER.info("Listening to messages...");
+        while(!terminate) {
+            try {
+                String message = queue.take();
+                processMessage(message);
+            } catch (InterruptedException e) {
+                LOGGER.warning("Event loop interrupted by: " + e);
+                terminate();
+            }
+        }
+    }
+
+    private void processMessage(String message) {
+        String splittedMessage[] = message.split(" ", 2);
+        String command = splittedMessage[0];
+        String serviceId = splittedMessage.length > 1? splittedMessage[1] : "";
+        switch (command) {
+            case "START-ALL":
+                runAll();
+                break;
+            case "STOP-ALL":
+                stopAll();
+                break;
+            case "START-SERVICE":
+                runService(serviceId);
+                break;
+            case "STOP-SERVICE":
+                stopService(serviceId);
+                break;
+            case "EXIT":
+                terminate();
+                break;
+            default:
+                LOGGER.warning("Unknown command " + command + " in message " + message);
+                break;
+        }
     }
 }

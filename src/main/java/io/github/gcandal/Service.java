@@ -3,114 +3,145 @@ package io.github.gcandal;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.CountDownLatch;
+import java.util.logging.Logger;
 
-public class Service {
-    private String id;
-    private Set<Service> childrenList = new HashSet<>();
+abstract class Service extends Thread {
+    private Set<Service> children = new HashSet<>();
+    private Set<Service> runningParents = new CopyOnWriteArraySet<>();
     private int indegree = 0;
     private boolean markedPerm = false;
     private boolean markedTemp = false;
     private CountDownLatch startLatch;
-    private CountDownLatch stopLatch;
     private Set<CountDownLatch> parentLatches = new HashSet<>();
-    private Set<CountDownLatch> childrenLatches = new HashSet<>();
+    Logger LOGGER = Logger.getLogger(ServiceManager.class.getName());
+    volatile boolean terminate = false;
+    String id;
 
-    public Service(String id) {
-        this.id = id;
+    Service() {
+        this.setUncaughtExceptionHandler(new ServiceExceptionHandler());
     }
 
-    public void addDependencies(List<Service> dependencies) {
-        childrenList.addAll(dependencies);
+    final void addDependencies(List<Service> dependencies) {
+        children.addAll(dependencies);
         dependencies.forEach(Service::increaseIndegree);
     }
 
-    public void increaseIndegree() {
+    private void increaseIndegree() {
         indegree += 1;
     }
 
-    public int getIndegree() {
+    final int getIndegree() {
         return indegree;
     }
 
-    public boolean isMarkedTemp() {
+    final boolean isMarkedTemp() {
         return markedTemp;
     }
 
-    public boolean isMarkedPerm() {
+    final boolean isMarkedPerm() {
         return markedPerm;
     }
 
-    public void markTemp() {
+    final void markTemp() {
         markedTemp = true;
     }
 
-    public void unmarkTemp() {
+    final void unmarkTemp() {
         markedTemp = false;
     }
 
-    public void markPerm() {
+    final void markPerm() {
         markedPerm = true;
     }
 
-    public Set<Service> getDependencies() {
-        return childrenList;
+    final Set<Service> getDependencies() {
+        return children;
     }
 
-    public String getId() {
+    final String getServiceId() {
         return id;
     }
 
     public String toString() {
-        return getId();
+        return getServiceId();
     }
 
-    public void initiateLatches() {
-        startLatch = new CountDownLatch(childrenList.size());
-        stopLatch = new CountDownLatch(indegree);
+    final void initiateLatches() {
+        startLatch = new CountDownLatch(children.size());
     }
 
-    public void addParentLatch(CountDownLatch parentLatch) {
+    final void addParentLatch(CountDownLatch parentLatch) {
         parentLatches.add(parentLatch);
     }
 
-    public void addChildLatch(CountDownLatch childLatch) {
-        childrenLatches.add(childLatch);
-    }
-
-    public Set<CountDownLatch> getParentLatches() {
+    final Set<CountDownLatch> getParentLatches() {
         return parentLatches;
     }
 
-    public Set<CountDownLatch> getChildrenLatches() {
-        return childrenLatches;
-    }
-
-    public CountDownLatch getStartLatch() {
+    final CountDownLatch getStartLatch() {
         return startLatch;
     }
 
-    public CountDownLatch getStopLatch() {
-        return stopLatch;
+    void requestStop() {
+        LOGGER.info("Service[" + id + "]: " + "Stopping");
+        LOGGER.info("Service[" + id + "]: " + "Waiting for parents to stop: " + runningParents);
+        terminate = true;
+        runningParents.forEach(Service::requestStop);
+        try {
+            while(runningParents.size() > 0) {
+                synchronized (this) {
+                    wait();
+                }
+            }
+        } catch (InterruptedException e) {
+            LOGGER.info("Service[" + id + "]: " + "Interrupted while trying to stop, retrying...");
+            requestStop();
+            return;
+        }
+        LOGGER.info("Service[" + id + "]: " + "Stopped");
+        children.forEach(children -> children.notifyStopped(this));
     }
 
-    public void requestStart() {
-        childrenList.forEach(Service::requestStart);
+    private void tryStart(Service parent) {
+        runningParents.add(parent);
+        synchronized (this) {
+            if(!isAlive()) {
+                start();
+            }
+        }
+    }
+
+    private void notifyStopped(Service parent) {
+        runningParents.remove(parent);
+        synchronized (this) {
+            notify();
+        }
+    }
+
+    @Override
+    public void run() {
+        LOGGER.info("Service[" + id + "]: " + "Starting");
+        LOGGER.info("Service[" + id + "]: " + "Waiting for children to start: " + children);
+        children.forEach(service -> service.tryStart(this));
         try {
             startLatch.await();
         } catch (InterruptedException e) {
-            e.printStackTrace();
+            LOGGER.info("Service[" + id + "]: " + "Interrupted while trying to start");
+            requestStop();
+            return;
         }
+        LOGGER.info("Service[" + id + "]: " + "Started");
         parentLatches.forEach(CountDownLatch::countDown);
+
+        doWork();
     }
 
-    public void requestStop() {
-        childrenList.forEach(Service::requestStart);
-        try {
-            startLatch.await();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-        parentLatches.forEach(CountDownLatch::countDown);
+    @Override
+    public int hashCode() {
+        return id.hashCode();
     }
+
+    abstract void doWork();
 }

@@ -1,5 +1,9 @@
 package io.github.gcandal;
 
+/**
+ * Concrete {@link Service} that prints to STDOUT
+ * in random intervals of 0 to 10 seconds.
+ */
 class SleepingService extends Service {
     SleepingService(String id) {
         super();
@@ -11,12 +15,12 @@ class SleepingService extends Service {
         try {
             while(!terminate) {
                 Thread.sleep((long)(Math.random() * 10000));
-                LOGGER.info("Service[" + id + "]: " + " Working...");
+                log("Working...");
             }
-            LOGGER.info("Service[" + id + "]: " + " Finished working.");
+            log("Finished working.");
         } catch (InterruptedException e) {
+            log("Got interrupted while working.");
             requestStop();
-            LOGGER.info("Service[" + id + "]: " + " Got interrupted while working.");
         }
     }
 }

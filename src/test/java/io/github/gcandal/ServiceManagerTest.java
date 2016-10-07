@@ -7,14 +7,21 @@ import static org.hamcrest.CoreMatchers.hasItems;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.util.*;
 
-
+/**
+ * Tests the {@link ServiceManager} class.
+ */
 public class ServiceManagerTest
 {
+    /**
+     * Checks general {@link ServiceManager} initialization,
+     * mainly if the {@link Service}s are well connected
+     * and possess correct references to each other.
+     * @throws IOException When there was an error reading the file.
+     */
     @Test
     public void testInitServiceManager() throws IOException {
         ServiceManager serviceManager = new ServiceManager("services.txt");
@@ -25,12 +32,17 @@ public class ServiceManagerTest
             d = serviceManager.getService("d"),
             e = serviceManager.getService("e");
 
+        /*
+        Check if the number of parents
+        is properly set
+        */
         assertEquals(2, a.getIndegree());
         assertEquals(1, b.getIndegree());
         assertEquals(1, c.getIndegree());
         assertEquals(0, d.getIndegree());
         assertEquals(0, e.getIndegree());
 
+        // Check if the nodes are connected correctly
         Set<Service> expectedDependencies = new HashSet<>();
         assertThat(a.getDependencies(), is(expectedDependencies));
 
@@ -46,29 +58,21 @@ public class ServiceManagerTest
         expectedDependencies.clear();
         assertThat(e.getDependencies(), is(expectedDependencies));
 
-        List<Service> topologicalOrder = new LinkedList<>(serviceManager.getTopologicalOrder());
-        int aOrder = topologicalOrder.indexOf(a),
-            bOrder = topologicalOrder.indexOf(b),
-            cOrder = topologicalOrder.indexOf(c),
-            dOrder = topologicalOrder.indexOf(d),
-            eOrder = topologicalOrder.indexOf(e);
-
-        assertTrue(aOrder < bOrder);
-        assertTrue(bOrder == cOrder - 1 || bOrder == cOrder + 1);
-        assertTrue(bOrder < dOrder);
-        assertTrue(dOrder == eOrder - 1 || dOrder == eOrder + 1);
-
+        /*
+        Check if the initialization latches
+        are shared properly among parent-child pairs
+         */
         assertThat(a.getParentLatches(), hasItems(b.getStartLatch(), c.getStartLatch()));
-
         assertThat(b.getParentLatches(), hasItems(d.getStartLatch()));
-
         assertThat(c.getParentLatches(), hasItems(d.getStartLatch()));
-
         assertEquals(0, d.getParentLatches().size());
-
         assertEquals(0, e.getParentLatches().size());
     }
 
+    /**
+     * Checks if the {@link ServiceManager} detects dependency cicles.
+     * @throws IOException When there was an error reading the file.
+     */
     @Test(expected = RuntimeException.class)
     public void testCyclicServiceManager() throws IOException {
         new ServiceManager("cyclic_services.txt");

@@ -6,40 +6,68 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class ServiceManager implements Runnable {
+/**
+ * Wires dependent {@link Service}s together
+ * and acts as a command dispatcher to start
+ * and stop them.
+ */
+class ServiceManager implements Runnable {
+    /**
+     * Queue to be used to pass commands
+     * to this manager.
+     */
     final BlockingQueue<String> queue = new LinkedBlockingQueue<>();
+    /**
+     * Marks that the manager should stop
+     * as soon as possible.
+     */
     private volatile boolean terminate = false;
-    private static final Logger LOGGER = Logger.getLogger(ServiceManager.class.getName());
+    /**
+     * Mapping of Service IDs to their reference.
+     */
     private Map<String, Service> services = new HashMap<>();
-    private PriorityQueue<Service> topologicalOrder = new PriorityQueue<>(new ServiceTopologicalComparator());
 
-    ServiceManager(String fileName) throws IOException, RuntimeException {
-        LOGGER.info("Initializing Service Manager...");
-        LOGGER.info("Reading dependencies from " + fileName + "...");
-        try (Stream<String> stream = Files.lines(Paths.get(fileName))) {
+    /**
+     * Reads a file where Service dependencies are specified,
+     * with the format of 'ServiceA (ServiceB)*', meaning that
+     * 'ServiceA' depends on 'ServiceB'.
+     * @param filePath The dependency filepath.
+     * @throws IOException When there was a problem reading the dependency file.
+     * @throws RuntimeException When the dependency graph is cyclic.
+     */
+    ServiceManager(String filePath) throws IOException, RuntimeException {
+        log("Initializing Service Manager...");
+        log("Reading dependencies from " + filePath + "...");
+        try (Stream<String> stream = Files.lines(Paths.get(filePath))) {
             stream.forEach(this::addServices);
         }
-        LOGGER.info("Checking for cycles in dependencies...");
+        log("Checking for cycles in dependencies...");
         if(!isAcyclic()) {
-            throw new RuntimeException("Dependencies read from " + fileName + " are cyclic.");
+            throw new RuntimeException("Dependencies read from " + filePath + " are cyclic.");
         }
-        services.values().forEach(service -> topologicalOrder.add(service));
-        LOGGER.info("Initiating latches...");
+        log("Initiating latches...");
         initiateLatches();
     }
 
+    /**
+     * Initiate all {@link Service#startLatch} and pass
+     * the references from parents to children.
+     */
     private void initiateLatches() {
-        services.values().forEach(Service::initiateLatches);
+        services.values().forEach(Service::initiateStartLatch);
         services.values().forEach(
                 parent -> parent.getDependencies()
                     .forEach(child -> child.addParentLatch(parent.getStartLatch()))
         );
     }
 
+    /**
+     * Parses a dependency file line.
+     * @param line A dependency file line.
+     */
     private void addServices(String line) {
         List<String> serviceIds = Arrays.asList(line.split(" "));
         String parentId = serviceIds.get(0);
@@ -53,6 +81,12 @@ public class ServiceManager implements Runnable {
         addService(parentId, childrenIds);
     }
 
+    /**
+     * Instantiates several {@link Service} and sets the dependencies
+     * between them.
+     * @param parentId The ID of the service that depends on childrenIDs
+     * @param childrenIds The IDs of the services which parentId depends on.
+     */
     private void addService(String parentId, List<String> childrenIds) {
         Service defaultService = new SleepingService(parentId);
         Service source = services.getOrDefault(parentId, defaultService);
@@ -64,6 +98,10 @@ public class ServiceManager implements Runnable {
         sinks.forEach(service -> services.putIfAbsent(service.getServiceId(), service));
     }
 
+    /**
+     * Checks if the graph is acyclic.
+     * @return True if the graph is acyclic.
+     */
     private boolean isAcyclic() {
         List<Service> unexplored = new LinkedList<>();
         unexplored.addAll(services.values());
@@ -80,6 +118,11 @@ public class ServiceManager implements Runnable {
         return true;
     }
 
+    /**
+     * Checks if a node is part of a cycle.
+     * @param node Node to be explored.
+     * @return True if the node was already seen in the current exploration.
+     */
     private boolean explore(Service node) {
         if(node.isMarkedTemp()) {
             return true;
@@ -96,14 +139,19 @@ public class ServiceManager implements Runnable {
         return false;
     }
 
-    public Service getService(String id) {
+    /**
+     * Returns {@link Service} with ID 'id'.
+     * @param id ID of the {@link Service}.
+     * @return {@link Service} with ID 'id'.
+     */
+    Service getService(String id) {
         return services.get(id);
     }
 
-    public PriorityQueue<Service> getTopologicalOrder() {
-        return topologicalOrder;
-    }
-
+    /**
+     * Returns the string representation of this {@link ServiceManager}.
+     * @return The string representation of this {@link ServiceManager}.
+     */
     public String toString() {
         StringBuilder builder = new StringBuilder();
         for(Service service : services.values()) {
@@ -114,84 +162,121 @@ public class ServiceManager implements Runnable {
             builder.append(service.getDependencies());
             builder.append(")\n");
         }
-        builder.append("Topological order: ");
-        builder.append(topologicalOrder);
-        builder.append("\n");
         return builder.toString();
     }
 
+    /**
+     * Returns {@link Service}s that no other {@link Service}
+     * depends on.
+     * @return {@link Service}s that no other {@link Service}
+     * depends on.
+     */
     private Set<Service> getSources() {
         return services.values().stream()
                 .filter(service -> service.getIndegree() == 0)
                 .collect(Collectors.toSet());
     }
 
+    /**
+     * Returns {@link Service}s that have no dependencies.
+     * @return {@link Service}s that have no dependencies.
+     */
     private Set<Service> getSinks() {
         return services.values().stream()
                 .filter(service -> service.getDependencies().size() == 0)
                 .collect(Collectors.toSet());
     }
 
+    /**
+     * Start all {@link Service}s.
+     */
     private void runAll() {
-        LOGGER.info("Starting all services...");
-        getSources().forEach(Service::start);
+        log("Starting all services...");
+        getSources().forEach(Service::tryStart);
     }
 
+    /**
+     * Starts a {@link Service} with a given ID.
+     * @param serviceId The ID of the {@link Service} being started.
+     */
     private void runService(String serviceId) {
-        LOGGER.info("Starting service" + serviceId + " ...");
+        log("Starting service" + serviceId + " ...");
         Service service = services.get(serviceId);
         if(service == null) {
-            LOGGER.warning("Service " + serviceId + " doesn't exist.");
+            log("Service " + serviceId + " doesn't exist.");
             return;
         }
         service.start();
     }
 
+    /**
+     * Request all {@link Service}s to stop.
+     */
+    private void stopAll() {
+        Set<Service> sinks = getSinks();
+        log("Stopping services: " + sinks);
+        sinks.forEach(Service::interrupt);
+        log("All running services stopped");
+    }
+
+    /**
+     * Requests the stopping of a {@link Service} with a given ID.
+     * @param serviceId The ID of the {@link Service} being stopped.
+     */
     private void stopService(String serviceId) {
-        LOGGER.info("Stopping service" + serviceId + " ...");
+        log("Stopping service" + serviceId + " ...");
         Service service = services.get(serviceId);
         if(service == null) {
-            LOGGER.warning("Service " + serviceId + " doesn't exist.");
+            log("Service " + serviceId + " doesn't exist.");
             return;
         }
         service.interrupt();
     }
 
-    private void stopAll() {
-        Set<Service> sinks = getSinks();
-        LOGGER.info("Stopping services: " + sinks);
-        sinks.forEach(Service::interrupt);
-        LOGGER.info("All running services stopped");
-    }
-
+    /**
+     * Terminates the {@link ServiceManager} as soon as possible.
+     * This means requesting all {@link Service}s to stop and wait
+     * for that to happen before terminating itself.
+     */
     private void terminate() {
-        LOGGER.info("Waiting for running services before terminating...");
+        stopAll();
+        log("Waiting for running services before terminating...");
         for(Service service: services.values()) {
             try {
                 service.join();
             } catch (InterruptedException e) {
-                LOGGER.warning("Termination was forced before all services could be stopped");
+                log("Termination was forced before all services could be stopped");
                 return;
             }
         }
         terminate = true;
-        LOGGER.info("Terminated");
+        log("Terminated");
     }
 
+    /**
+     * While the {@link ServiceManager} is running,
+     * reads messages from the {@link ServiceManager#queue}
+     * and acts upon them.
+     */
     @Override
     public void run() {
-        LOGGER.info("Listening to messages...");
+        log("Listening to messages...");
         while(!terminate) {
             try {
                 String message = queue.take();
                 processMessage(message);
             } catch (InterruptedException e) {
-                LOGGER.warning("Event loop interrupted by: " + e);
+                log("Event loop interrupted by: " + e);
                 terminate();
             }
         }
     }
 
+    /**
+     * Mapping from messages received in the {@link ServiceManager#queue}
+     * and actions to take.
+     * @param message The message being received.
+     */
     private void processMessage(String message) {
         String splittedMessage[] = message.split(" ", 2);
         String command = splittedMessage[0];
@@ -213,8 +298,16 @@ public class ServiceManager implements Runnable {
                 terminate();
                 break;
             default:
-                LOGGER.warning("Unknown command " + command + " in message " + message);
+                log("Unknown command " + command + " in message " + message);
                 break;
         }
+    }
+
+    /**
+     * Print a message prepended by the Thread name.
+     * @param message The message being printed.
+     */
+    private void log(String message) {
+        System.out.println("ServiceManager-" + Thread.currentThread().getName() + ": " + message);
     }
 }

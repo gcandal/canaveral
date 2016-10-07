@@ -1,14 +1,26 @@
 package io.github.gcandal;
 
-import java.util.logging.Logger;
-
-public class ServiceExceptionHandler implements Thread.UncaughtExceptionHandler {
-    private Logger LOGGER = Logger.getLogger(ServiceManager.class.getName());
+/**
+ * Used to log error messages issued by
+ * uncaught Exceptions in {@link Service}s
+ * with a custom format.
+ */
+class ServiceExceptionHandler implements Thread.UncaughtExceptionHandler {
     public void uncaughtException(Thread t, Throwable e) {
         if(!(t instanceof Service)) {
             return;
         }
         Service service = (Service) t;
-        LOGGER.severe("Service[" + service.id + "]: " + e);
+        log(service, e.toString());
+    }
+
+    /**
+     * Print a message prepended by the Service's ID
+     * and Thread name.
+     * @param service The service that triggered the exception.
+     * @param message The message being printed.
+     */
+    private void log(Service service, String message) {
+        System.err.println("Service[" + service.id + "]" + service.getName() + ": " + message);
     }
 }

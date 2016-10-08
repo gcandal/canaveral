@@ -190,13 +190,13 @@ abstract class Service extends Thread {
      * stop executing by setting the {@link Service#terminate}
      * flag.
      */
-    void requestStop() {
+    private void requestStop() {
         log("Stopping");
         log("Waiting for parents to stop: " + runningParents);
         runningParents.forEach(Service::requestStop);
         try {
-            while(runningParents.size() > 0) {
-                synchronized (this) {
+            synchronized (this) {
+                while(runningParents.size() > 0) {
                     wait();
                 }
             }
@@ -216,10 +216,9 @@ abstract class Service extends Thread {
      * @param parent A service which depends on the one being started.
      */
     private void tryStart(Service parent) {
-        runningParents.add(parent);
         synchronized (this) {
+            runningParents.add(parent);
             if(!isAlive()) {
-                terminate = false;
                 start();
             }
         }
@@ -245,8 +244,8 @@ abstract class Service extends Thread {
      * @param parent The service depending on this one which has stopped.
      */
     private void notifyStopped(Service parent) {
-        runningParents.remove(parent);
         synchronized (this) {
+            runningParents.remove(parent);
             notify();
         }
     }
@@ -276,15 +275,22 @@ abstract class Service extends Thread {
         log("Starting");
         waitDependencies();
         log("Started");
-        doWork();
+
+        try {
+            doWork();
+        } catch (InterruptedException e) {
+            log("Got interrupted while working.");
+            requestStop();
+        }
     }
 
     /**
      * Entry point for different Service implementations.
      * This function should either be non-blocking or
      * periodically check the {@link Service#terminate} flag.
+     * @throws InterruptedException When the Service is interrupted while working.
      */
-    abstract void doWork();
+    abstract void doWork() throws InterruptedException;
 
     /**
      * Print a message prepended by the Service's ID

@@ -1,5 +1,8 @@
 package io.github.gcandal;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
+
 /**
  * Used to log error messages issued by
  * uncaught Exceptions in {@link Service}s
@@ -11,7 +14,10 @@ class ServiceExceptionHandler implements Thread.UncaughtExceptionHandler {
             return;
         }
         Service service = (Service) t;
-        log(service, e.toString());
+        StringWriter stringWriter = new StringWriter();
+        PrintWriter printWriter = new PrintWriter(stringWriter);
+        e.printStackTrace(printWriter);
+        log(service, stringWriter.toString());
     }
 
     /**

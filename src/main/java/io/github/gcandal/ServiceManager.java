@@ -171,7 +171,7 @@ class ServiceManager implements Runnable {
      * @return {@link Service}s that no other {@link Service}
      * depends on.
      */
-    private Set<Service> getSources() {
+    Set<Service> getSources() {
         return services.values().stream()
                 .filter(service -> service.getIndegree() == 0)
                 .collect(Collectors.toSet());
@@ -181,7 +181,7 @@ class ServiceManager implements Runnable {
      * Returns {@link Service}s that have no dependencies.
      * @return {@link Service}s that have no dependencies.
      */
-    private Set<Service> getSinks() {
+    Set<Service> getSinks() {
         return services.values().stream()
                 .filter(service -> service.getDependencies().size() == 0)
                 .collect(Collectors.toSet());

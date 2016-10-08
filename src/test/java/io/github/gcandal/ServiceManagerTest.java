@@ -10,6 +10,7 @@ import static org.junit.Assert.assertThat;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
 
 /**
  * Tests the {@link ServiceManager} class.
@@ -36,6 +37,15 @@ public class ServiceManagerTest
         Check if the number of parents
         is properly set
         */
+        Set<Service> expectedSources = new HashSet<>(),
+                expectedSinks = new HashSet<>();
+        expectedSources.add(d);
+        expectedSources.add(e);
+        expectedSinks.add(a);
+        expectedSinks.add(e);
+        assertThat(serviceManager.getSources(), is(expectedSources));
+        assertThat(serviceManager.getSinks(), is(expectedSinks));
+
         assertEquals(2, a.getIndegree());
         assertEquals(1, b.getIndegree());
         assertEquals(1, c.getIndegree());

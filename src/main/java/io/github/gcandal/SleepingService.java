@@ -11,16 +11,11 @@ class SleepingService extends Service {
     }
 
     @Override
-    void doWork() {
-        try {
-            while(!terminate) {
-                Thread.sleep((long)(Math.random() * 10000));
-                log("Working...");
-            }
-            log("Finished working.");
-        } catch (InterruptedException e) {
-            log("Got interrupted while working.");
-            requestStop();
+    void doWork() throws InterruptedException {
+        while(!terminate) {
+            Thread.sleep((long)(Math.random() * 10000));
+            log("Working...");
         }
+        log("Finished working.");
     }
 }

@@ -13,7 +13,7 @@ import java.util.concurrent.BlockingQueue;
  */
 public class App {
     public static void main(String[] args) {
-        String filename = "services.txt";
+        String filename = args.length > 0? args[0] : "services.txt";
         ServiceManager serviceManager = null;
 
         try {
@@ -28,7 +28,7 @@ public class App {
             return;
         }
 
-        BlockingQueue<String> queue = serviceManager.queue;
+        BlockingQueue<String> messageQueue = serviceManager.queue;
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         new Thread(serviceManager).start();
 
@@ -37,11 +37,11 @@ public class App {
                 final String line = reader.readLine();
 
                 if (line == null || line.equals("EXIT")) {
-                    queue.put("EXIT");
+                    messageQueue.put("EXIT");
                     break;
                 }
 
-                queue.put(line);
+                messageQueue.put(line);
             }
         } catch (InterruptedException | IOException e) {
             e.printStackTrace();

@@ -55,9 +55,18 @@ abstract class Service extends Thread {
      */
     volatile boolean terminate = false;
     /**
+     * The time in milliseconds to wait for parents to finish.
+     */
+    private long timeout = 0;
+    /**
      * Identification name of the service.
      */
     String id;
+    /**
+     * Flag used for testing. Makes the Service ignore the
+     * {@link Service#terminate} flag.
+     */
+    boolean isBad = false;
 
     Service() {
         this.setUncaughtExceptionHandler(new ServiceExceptionHandler());
@@ -150,6 +159,17 @@ abstract class Service extends Thread {
     }
 
     /**
+     * Sets the time in milliseconds to wait for parents to finish.
+     * @param timeout The new timeout value in milliseconds.
+     */
+    void setTimeout(long timeout) {
+        if(timeout < 0) {
+            throw new RuntimeException(buildMessage("Timeout value must be positive, not " + timeout));
+        }
+        this.timeout = timeout;
+    }
+
+    /**
      * When the dependencies are all defined,
      * initiates the {@link Service#startLatch}
      * with the proper count.
@@ -194,20 +214,22 @@ abstract class Service extends Thread {
         log("Stopping");
         log("Waiting for parents to stop: " + runningParents);
         runningParents.forEach(Service::requestStop);
+        long timeoutExpires = System.currentTimeMillis() + timeout;
         try {
             synchronized (this) {
                 while(runningParents.size() > 0) {
-                    wait();
+                    wait(timeout);
+                    if (System.currentTimeMillis() >= timeoutExpires) {
+                        break;
+                    }
                 }
             }
         } catch (InterruptedException e) {
-            log("Interrupted while trying to stop, retrying...");
-            requestStop();
+            log("Timeout while waiting for parents " + runningParents + " to stop.");
             return;
         }
         terminate = true;
-        log("Stopped");
-        dependencies.forEach(children -> children.notifyStopped(this));
+        log("Is able to stop");
     }
 
     /**
@@ -282,6 +304,8 @@ abstract class Service extends Thread {
             log("Got interrupted while working.");
             requestStop();
         }
+        dependencies.forEach(children -> children.notifyStopped(this));
+        log("Stopped");
     }
 
     /**
@@ -298,6 +322,10 @@ abstract class Service extends Thread {
      * @param message The message being printed.
      */
     void log(String message) {
-        System.out.println("Service[" + id + "]-" + getName() + ": " + message);
+        System.out.println(buildMessage(message));
+    }
+
+    private String buildMessage(String message) {
+        return "Service[" + id + "]-" + getName() + ": " + message;
     }
 }

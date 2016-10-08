@@ -200,7 +200,7 @@ class ServiceManager implements Runnable {
      * @param serviceId The ID of the {@link Service} being started.
      */
     private void runService(String serviceId) {
-        log("Starting service" + serviceId + " ...");
+        log("Starting service " + serviceId + " ...");
         Service service = services.get(serviceId);
         if(service == null) {
             log("Service " + serviceId + " doesn't exist.");
@@ -224,7 +224,7 @@ class ServiceManager implements Runnable {
      * @param serviceId The ID of the {@link Service} being stopped.
      */
     private void stopService(String serviceId) {
-        log("Stopping service" + serviceId + " ...");
+        log("Stopping service " + serviceId + " ...");
         Service service = services.get(serviceId);
         if(service == null) {
             log("Service " + serviceId + " doesn't exist.");

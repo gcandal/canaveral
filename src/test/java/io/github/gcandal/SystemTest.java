@@ -47,6 +47,32 @@ public class SystemTest {
     }
 
     /**
+     * Sees if interrupting a service while it's starting causes no problems.
+     * @throws IOException When there was an error reading the file.
+     * @throws InterruptedException When the test was interrupted during sleeps.
+     */
+    @Test
+    public void testTimeout() throws IOException, InterruptedException {
+        ServiceManager serviceManager = new ServiceManager("services.txt");
+        BlockingQueue<String> messageQueue = serviceManager.queue;
+        Service a = serviceManager.getService("a"),
+            b = serviceManager.getService("b");
+        new Thread(serviceManager).start();
+
+        b.isBad = true;
+        a.setTimeout(1);
+
+        assertEquals(false, a.isAlive());
+        messageQueue.put("START-SERVICE b");
+
+        Thread.sleep(1000);
+        messageQueue.put("STOP-SERVICE a");
+
+        Thread.sleep(1000);
+        assertEquals(false, a.isAlive());
+    }
+
+    /**
      * Tests the 'START-ALL' and 'STOP-ALL' commands.
      * @throws IOException When there was an error reading the file.
      * @throws InterruptedException When the test was interrupted during sleeps.
@@ -91,7 +117,7 @@ public class SystemTest {
          Must wait for the maximum time between SleepingService's stop
          flag reads (10s)
           */
-        Thread.sleep(10000);
+        Thread.sleep(15000);
 
         // b, c and d ultimately depend on a,
         // so they should've stopped
@@ -139,7 +165,7 @@ public class SystemTest {
          Must wait for the maximum time between SleepingService's stop
          flag reads (10s)
           */
-        Thread.sleep(10000);
+        Thread.sleep(15000);
 
         assertEquals(false, a.isAlive());
         assertEquals(false, b.isAlive());
@@ -185,7 +211,7 @@ public class SystemTest {
          Must wait for the maximum time between SleepingService's stop
          flag reads (10s)
           */
-        Thread.sleep(10000);
+        Thread.sleep(15000);
 
         assertEquals(false, a.isAlive());
         assertEquals(false, b.isAlive());

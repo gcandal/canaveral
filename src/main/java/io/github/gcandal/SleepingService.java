@@ -8,15 +8,15 @@ class SleepingService extends Service {
     SleepingService(String id) {
         super();
         this.id = id;
-        setTimeout(15000);
+        setTimeout(1500);
     }
 
     @Override
     void doWork() throws InterruptedException {
-        while(!terminate || isBad) {
-            Thread.sleep((long)(Math.random() * 10000));
+        while(!stop || isBad) {
+            Thread.sleep((long)(Math.random() * 1000));
             log("Working...");
         }
-        log("Finished working.");
+        log("Stopped working.");
     }
 }

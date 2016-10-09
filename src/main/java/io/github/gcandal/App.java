@@ -33,6 +33,10 @@ public class App {
         new Thread(serviceManager).start();
 
         try {
+            messageQueue.put("RESUME-SERVICE a");
+            messageQueue.put("STOP-SERVICE a");
+            messageQueue.put("RESUME-SERVICE a");
+
             while (true) {
                 final String line = reader.readLine();
 

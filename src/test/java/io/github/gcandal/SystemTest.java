@@ -23,13 +23,14 @@ public class SystemTest {
         ServiceManager serviceManager = new ServiceManager("services.txt");
         BlockingQueue<String> messageQueue = serviceManager.queue;
         new Thread(serviceManager).start();
+
         messageQueue.put("STOP-ALL");
-        messageQueue.put("START-ALL");
-        messageQueue.put("START-ALL");
+        messageQueue.put("RESUME-ALL");
+        messageQueue.put("RESUME-ALL");
     }
 
     /**
-     * Sees if interrupting a service while it's starting causes no problems.
+     * Sees if stopping a service while it's starting causes no problems.
      * @throws IOException When there was an error reading the file.
      * @throws InterruptedException When the test was interrupted during sleeps.
      */
@@ -37,17 +38,14 @@ public class SystemTest {
     public void testInterruptStart() throws IOException, InterruptedException {
         ServiceManager serviceManager = new ServiceManager("services.txt");
         BlockingQueue<String> messageQueue = serviceManager.queue;
-        Service a = serviceManager.getService("a");
         new Thread(serviceManager).start();
 
-        assertEquals(false, a.isAlive());
-        messageQueue.put("START-SERVICE a");
-        messageQueue.put("STOP-SERVICE a");
-        assertEquals(false, a.isAlive());
+        messageQueue.put("RESUME-SERVICE d");
+        messageQueue.put("STOP-SERVICE d");
     }
 
     /**
-     * Sees if interrupting a service while it's starting causes no problems.
+     * Sees if stopping timeout is working properly.
      * @throws IOException When there was an error reading the file.
      * @throws InterruptedException When the test was interrupted during sleeps.
      */
@@ -62,18 +60,16 @@ public class SystemTest {
         b.isBad = true;
         a.setTimeout(1);
 
-        assertEquals(false, a.isAlive());
-        messageQueue.put("START-SERVICE b");
-
-        Thread.sleep(1000);
+        messageQueue.put("RESUME-SERVICE b");
         messageQueue.put("STOP-SERVICE a");
+        waitPropagation();
 
-        Thread.sleep(1000);
-        assertEquals(false, a.isAlive());
+        assertEquals(Service.ServiceState.WAITING_RUN, a.state);
+        assertEquals(Service.ServiceState.WAITING_STOP, b.state);
     }
 
     /**
-     * Tests the 'START-ALL' and 'STOP-ALL' commands.
+     * Tests the 'RESUME-ALL' and 'STOP-ALL' commands.
      * @throws IOException When there was an error reading the file.
      * @throws InterruptedException When the test was interrupted during sleeps.
      */
@@ -88,48 +84,38 @@ public class SystemTest {
                 e = serviceManager.getService("e");
         new Thread(serviceManager).start();
 
-        assertEquals(false, a.isAlive());
-        assertEquals(false, b.isAlive());
-        assertEquals(false, c.isAlive());
-        assertEquals(false, d.isAlive());
-        assertEquals(false, e.isAlive());
-
-        messageQueue.put("START-SERVICE b");
-        Thread.sleep(1000);
+        messageQueue.put("RESUME-SERVICE b");
+        waitPropagation();
 
         // a is a dependency of b, so it should be running
-        assertEquals(true, a.isAlive());
-        assertEquals(true, b.isAlive());
+        assertEquals(Service.ServiceState.RUNNING, a.state);
+        assertEquals(Service.ServiceState.RUNNING, b.state);
 
-        messageQueue.put("START-SERVICE d");
-        Thread.sleep(1000);
+        messageQueue.put("RESUME-SERVICE d");
+        waitPropagation();
 
         // Dependencies of d should be running
-        assertEquals(true, a.isAlive());
-        assertEquals(true, b.isAlive());
-        assertEquals(true, c.isAlive());
-        assertEquals(true, d.isAlive());
-        assertEquals(false, e.isAlive());
+        assertEquals(Service.ServiceState.RUNNING, a.state);
+        assertEquals(Service.ServiceState.RUNNING, b.state);
+        assertEquals(Service.ServiceState.RUNNING, c.state);
+        assertEquals(Service.ServiceState.RUNNING, d.state);
+        assertEquals(Service.ServiceState.WAITING_RUN, e.state);
 
 
         messageQueue.put("STOP-SERVICE a");
-        /*
-         Must wait for the maximum time between SleepingService's stop
-         flag reads (10s)
-          */
-        Thread.sleep(15000);
+        waitPropagation();
 
         // b, c and d ultimately depend on a,
         // so they should've stopped
-        assertEquals(false, a.isAlive());
-        assertEquals(false, b.isAlive());
-        assertEquals(false, c.isAlive());
-        assertEquals(false, d.isAlive());
-        assertEquals(false, e.isAlive());
+        assertEquals(Service.ServiceState.WAITING_RUN, a.state);
+        assertEquals(Service.ServiceState.WAITING_RUN, b.state);
+        assertEquals(Service.ServiceState.WAITING_RUN, c.state);
+        assertEquals(Service.ServiceState.WAITING_RUN, d.state);
+        assertEquals(Service.ServiceState.WAITING_RUN, e.state);
     }
 
     /**
-     * Tests the 'START-ALL' and 'STOP-ALL' commands.
+     * Tests the 'RESUME-ALL' and 'STOP-ALL' commands.
      * @throws IOException When there was an error reading the file.
      * @throws InterruptedException When the test was interrupted during sleeps.
      */
@@ -144,38 +130,28 @@ public class SystemTest {
                 e = serviceManager.getService("e");
         new Thread(serviceManager).start();
 
-        assertEquals(false, a.isAlive());
-        assertEquals(false, b.isAlive());
-        assertEquals(false, c.isAlive());
-        assertEquals(false, d.isAlive());
-        assertEquals(false, e.isAlive());
+        messageQueue.put("RESUME-ALL");
+        waitPropagation();
 
-        messageQueue.put("START-ALL");
-        Thread.sleep(1000);
-
-        assertEquals(true, a.isAlive());
-        assertEquals(true, b.isAlive());
-        assertEquals(true, c.isAlive());
-        assertEquals(true, d.isAlive());
-        assertEquals(true, e.isAlive());
+        assertEquals(Service.ServiceState.RUNNING, a.state);
+        assertEquals(Service.ServiceState.RUNNING, b.state);
+        assertEquals(Service.ServiceState.RUNNING, c.state);
+        assertEquals(Service.ServiceState.RUNNING, d.state);
+        assertEquals(Service.ServiceState.RUNNING, e.state);
 
 
         messageQueue.put("STOP-ALL");
-        /*
-         Must wait for the maximum time between SleepingService's stop
-         flag reads (10s)
-          */
-        Thread.sleep(15000);
+        waitPropagation();
 
-        assertEquals(false, a.isAlive());
-        assertEquals(false, b.isAlive());
-        assertEquals(false, c.isAlive());
-        assertEquals(false, d.isAlive());
-        assertEquals(false, e.isAlive());
+        assertEquals(Service.ServiceState.WAITING_RUN, a.state);
+        assertEquals(Service.ServiceState.WAITING_RUN, b.state);
+        assertEquals(Service.ServiceState.WAITING_RUN, c.state);
+        assertEquals(Service.ServiceState.WAITING_RUN, d.state);
+        assertEquals(Service.ServiceState.WAITING_RUN, e.state);
     }
 
     /**
-     * Tests the 'START-ALL' and 'STOP-ALL' commands.
+     * Tests the 'RESUME-ALL' and 'STOP-ALL' commands.
      * @throws IOException When there was an error reading the file.
      * @throws InterruptedException When the test was interrupted during sleeps.
      */
@@ -190,33 +166,26 @@ public class SystemTest {
                 e = serviceManager.getService("e");
         new Thread(serviceManager).start();
 
-        assertEquals(false, a.isAlive());
-        assertEquals(false, b.isAlive());
-        assertEquals(false, c.isAlive());
-        assertEquals(false, d.isAlive());
-        assertEquals(false, e.isAlive());
+        messageQueue.put("RESUME-ALL");
+        waitPropagation();
 
-        messageQueue.put("START-ALL");
-        Thread.sleep(1000);
-
-        assertEquals(true, a.isAlive());
-        assertEquals(true, b.isAlive());
-        assertEquals(true, c.isAlive());
-        assertEquals(true, d.isAlive());
-        assertEquals(true, e.isAlive());
-
+        assertEquals(Service.ServiceState.RUNNING, a.state);
+        assertEquals(Service.ServiceState.RUNNING, b.state);
+        assertEquals(Service.ServiceState.RUNNING, c.state);
+        assertEquals(Service.ServiceState.RUNNING, d.state);
+        assertEquals(Service.ServiceState.RUNNING, e.state);
 
         messageQueue.put("EXIT");
-        /*
-         Must wait for the maximum time between SleepingService's stop
-         flag reads (10s)
-          */
-        Thread.sleep(15000);
+        waitPropagation();
 
-        assertEquals(false, a.isAlive());
-        assertEquals(false, b.isAlive());
-        assertEquals(false, c.isAlive());
-        assertEquals(false, d.isAlive());
-        assertEquals(false, e.isAlive());
+        assertEquals(Service.ServiceState.TERMINATED, a.state);
+        assertEquals(Service.ServiceState.TERMINATED, b.state);
+        assertEquals(Service.ServiceState.TERMINATED, c.state);
+        assertEquals(Service.ServiceState.TERMINATED, d.state);
+        assertEquals(Service.ServiceState.TERMINATED, e.state);
+    }
+
+    private void waitPropagation() throws InterruptedException {
+        Thread.sleep(2000);
     }
 }

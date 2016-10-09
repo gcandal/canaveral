@@ -4,7 +4,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.CountDownLatch;
 
 /**
  * Abstract Service class providing the
@@ -13,18 +12,27 @@ import java.util.concurrent.CountDownLatch;
  * implement work to be done
  */
 abstract class Service extends Thread {
+    /**
+     * Services which this service depends on.
+     */
     private Set<Service> dependencies = new HashSet<>();
+    /**
+     * Services which depend on this service.
+     */
+    private Set<Service> parents = new HashSet<>();
+    /**
+     * Services which this service depends
+     * on and are already running. A service
+     * must only start when this set matches
+     * {@link Service#dependencies}.
+     */
+    private Set<Service> runningDependencies = new CopyOnWriteArraySet<>();
     /**
      * Services which depend on this service
      * and are running, meaning that this service
      * should only stop after they also do.
      */
     private Set<Service> runningParents = new CopyOnWriteArraySet<>();
-    /**
-     * Number of services who have this
-     * one as dependency
-     */
-    private int indegree = 0;
     /**
      * Auxiliary variable sed by the DFS
      * topological sort algorithm
@@ -38,22 +46,14 @@ abstract class Service extends Thread {
      */
     private boolean markedTemp = false;
     /**
-     * Latch that controls if all the
-     * dependencies have started.
+     * The {@link Service} should stop
+     * doing work.
      */
-    private CountDownLatch startLatch;
+    volatile boolean stop = true;
     /**
-     * References to the latches of the
-     * services that depend on this one,
-     * so they can be notified once this
-     * service is running.
+     * The {@link Service} thread should stop.
      */
-    private Set<CountDownLatch> parentLatches = new HashSet<>();
-    /**
-     * Marks that the work being done
-     * should be interrupted.
-     */
-    volatile boolean terminate = false;
+    private volatile boolean terminate = false;
     /**
      * The time in milliseconds to wait for parents to finish.
      */
@@ -64,9 +64,20 @@ abstract class Service extends Thread {
     String id;
     /**
      * Flag used for testing. Makes the Service ignore the
-     * {@link Service#terminate} flag.
+     * {@link Service#stop} flag.
      */
     boolean isBad = false;
+    /**
+     * The Service current state.
+     */
+    volatile ServiceState state = ServiceState.CREATED;
+
+    /**
+     * Possible states of a service.
+     */
+    enum ServiceState {
+        CREATED, WAITING_RUN, RUNNING, WAITING_STOP, TERMINATED
+    }
 
     Service() {
         this.setUncaughtExceptionHandler(new ServiceExceptionHandler());
@@ -78,22 +89,26 @@ abstract class Service extends Thread {
      */
     final void addDependencies(List<Service> dependencies) {
         this.dependencies.addAll(dependencies);
-        dependencies.forEach(Service::increaseIndegree);
+        dependencies.forEach(dependency -> dependency.addParent(this));
     }
 
     /**
-     * Increments {@link Service#indegree}.
+     * Registers a service has one that depends on this
+     * one.
+     * @param parent Service which depends on this one.
      */
-    private void increaseIndegree() {
-        indegree += 1;
+    final void addParent(Service parent) {
+        parents.add(parent);
     }
 
     /**
-     * Returns {@link Service#indegree}.
-     * @return {@link Service#indegree}
+     * Returns the number of services which depend
+     * upon this one.
+     * @return The number of services which depend
+     * upon this one.
      */
     final int getIndegree() {
-        return indegree;
+        return parents.size();
     }
 
     /**
@@ -170,36 +185,38 @@ abstract class Service extends Thread {
     }
 
     /**
-     * When the dependencies are all defined,
-     * initiates the {@link Service#startLatch}
-     * with the proper count.
+     * Sets the values of the control flags.
+     * @param stop New value of the {@link Service#stop} flag.
+     * @param terminate New value of the {@link Service#terminate} flag.
      */
-    final void initiateStartLatch() {
-        startLatch = new CountDownLatch(dependencies.size());
+    private void setStop(boolean stop, boolean terminate) {
+        this.stop = stop;
+        this.terminate = terminate;
+        synchronized (this) {
+            notify();
+        }
     }
 
     /**
-     * Adds a latch of a Service that depends on this one.
-     * @param parentLatch Latch of a Service that depends on this one.
+     * Request this service to resume
+     * doing work.
      */
-    final void addParentLatch(CountDownLatch parentLatch) {
-        parentLatches.add(parentLatch);
+    void requestResume() {
+        log("Resuming");
+        waitDependencies();
+        setStop(false, terminate);
+        state = ServiceState.RUNNING;
+        log("Resumed.");
     }
 
     /**
-     * Returns latches of Services that depend on this one.
-     * @return Latches of Services that depend on this one.
+     * Used by a parent service to request a dependency
+     * to start doing work.
+     * @param parent service which depends on this one.
      */
-    final Set<CountDownLatch> getParentLatches() {
-        return parentLatches;
-    }
-
-    /**
-     * Returns this service's {@link Service#startLatch}.
-     * @return This service's {@link Service#startLatch}.
-     */
-    final CountDownLatch getStartLatch() {
-        return startLatch;
+    private void requestResume(Service parent) {
+        runningParents.add(parent);
+        requestResume();
     }
 
     /**
@@ -207,20 +224,27 @@ abstract class Service extends Thread {
      * waiting for all of his parents (the services
      * that are dependent on it) stop running; when
      * that happens, indicate that the work should
-     * stop executing by setting the {@link Service#terminate}
+     * stop executing by setting the {@link Service#stop}
      * flag.
      */
-    private void requestStop() {
+    private void requestStop(boolean terminate) {
+        if(stop) {
+            return;
+        }
         log("Stopping");
         log("Waiting for parents to stop: " + runningParents);
-        runningParents.forEach(Service::requestStop);
+        state = ServiceState.WAITING_STOP;
+        runningParents.forEach(parent -> parent.requestStop(terminate));
         long timeoutExpires = System.currentTimeMillis() + timeout;
         try {
             synchronized (this) {
                 while(runningParents.size() > 0) {
                     wait(timeout);
                     if (System.currentTimeMillis() >= timeoutExpires) {
+                        log("Timeout while waiting for parents " + runningParents + " to stop.");
                         break;
+                    } else {
+                        log("Waiting for parents to stop: " + runningParents);
                     }
                 }
             }
@@ -228,33 +252,40 @@ abstract class Service extends Thread {
             log("Timeout while waiting for parents " + runningParents + " to stop.");
             return;
         }
-        terminate = true;
+        setStop(true, terminate);
         log("Is able to stop");
     }
 
     /**
-     * Start the service if it is not running
-     * already.
-     * @param parent A service which depends on the one being started.
+     * Try to gracefully terminate this service. This means
+     * initiating the {@link Service#requestStop(boolean)}
+     * protocol.
      */
-    private void tryStart(Service parent) {
-        synchronized (this) {
-            runningParents.add(parent);
-            if(!isAlive()) {
-                start();
-            }
-        }
+    void requestStop() {
+        requestStop(false);
     }
 
     /**
-     * Start the service if it is not running
-     * already.
+     * Try to gracefully terminate this service. This means
+     * initiating the {@link Service#requestStop(boolean)}
+     * protocol and setting the {@link Service#terminate}
+     * flag.
      */
-    void tryStart() {
+    void requestTerminate() {
+        log("Trying to terminate...");
+        requestStop(true);
+    }
+
+    /**
+     * Notify this service that one of its
+     * dependencies has started, indicating
+     * that it could possibly start running.
+     * @param dependency A dependency of this service.
+     */
+    private void notifyResumed(Service dependency) {
         synchronized (this) {
-            if(!isAlive()) {
-                start();
-            }
+            runningDependencies.add(dependency);
+            notify();
         }
     }
 
@@ -279,39 +310,57 @@ abstract class Service extends Thread {
      */
     private void waitDependencies() {
         log("Waiting for dependencies to start: " + dependencies);
-        dependencies.forEach(service -> service.tryStart(this));
+        dependencies.forEach(dependency -> dependency.requestResume(this));
         try {
-            startLatch.await();
+            synchronized (this) {
+                while(!dependencies.equals(runningDependencies)) {
+                    wait();
+                }
+            }
         } catch (InterruptedException e) {
             log("Interrupted while trying to start");
             requestStop();
         }
-        parentLatches.forEach(CountDownLatch::countDown);
+        parents.forEach(parent -> parent.notifyResumed(this));
     }
 
     /**
-     * Service's initiation procedure.
+     * Service's work loop.
      */
     @Override
     public void run() {
-        log("Starting");
-        waitDependencies();
-        log("Started");
+        log("Waiting for resuming...");
+        state = ServiceState.WAITING_RUN;
+
+        try {
+            synchronized (this) {
+                while(stop) {
+                    wait();
+                }
+            }
+        } catch (InterruptedException e) {
+            log("Got interrupted while stopped.");}
 
         try {
             doWork();
         } catch (InterruptedException e) {
             log("Got interrupted while working.");
-            requestStop();
         }
+
         dependencies.forEach(children -> children.notifyStopped(this));
-        log("Stopped");
+
+        if(terminate) {
+            log("Terminated");
+            state = ServiceState.TERMINATED;
+        } else {
+            run();
+        }
     }
 
     /**
      * Entry point for different Service implementations.
      * This function should either be non-blocking or
-     * periodically check the {@link Service#terminate} flag.
+     * periodically check the {@link Service#stop} flag.
      * @throws InterruptedException When the Service is interrupted while working.
      */
     abstract void doWork() throws InterruptedException;

@@ -48,20 +48,7 @@ class ServiceManager implements Runnable {
         if(!isAcyclic()) {
             throw new RuntimeException("Dependencies read from " + filePath + " are cyclic.");
         }
-        log("Initiating latches...");
-        initiateLatches();
-    }
-
-    /**
-     * Initiate all {@link Service#startLatch} and pass
-     * the references from parents to children.
-     */
-    private void initiateLatches() {
-        services.values().forEach(Service::initiateStartLatch);
-        services.values().forEach(
-                parent -> parent.getDependencies()
-                    .forEach(child -> child.addParentLatch(parent.getStartLatch()))
-        );
+        services.values().forEach(Service::start);
     }
 
     /**
@@ -95,7 +82,10 @@ class ServiceManager implements Runnable {
         List<Service> sinks = sinksStream.collect(Collectors.toList());
         source.addDependencies(sinks);
         services.putIfAbsent(parentId, source);
-        sinks.forEach(service -> services.putIfAbsent(service.getServiceId(), service));
+        sinks.forEach(service -> {
+            services.putIfAbsent(service.getServiceId(), service);
+            service.addParent(source);
+        });
     }
 
     /**
@@ -191,8 +181,8 @@ class ServiceManager implements Runnable {
      * Start all {@link Service}s.
      */
     private void runAll() {
-        log("Starting all services...");
-        getSources().forEach(Service::tryStart);
+        log("Resuming all services...");
+        getSources().forEach(Service::requestResume);
     }
 
     /**
@@ -200,13 +190,13 @@ class ServiceManager implements Runnable {
      * @param serviceId The ID of the {@link Service} being started.
      */
     private void runService(String serviceId) {
-        log("Starting service " + serviceId + " ...");
+        log("Resuming service " + serviceId + " ...");
         Service service = services.get(serviceId);
         if(service == null) {
             log("Service " + serviceId + " doesn't exist.");
             return;
         }
-        service.start();
+        service.requestResume();
     }
 
     /**
@@ -215,8 +205,16 @@ class ServiceManager implements Runnable {
     private void stopAll() {
         Set<Service> sinks = getSinks();
         log("Stopping services: " + sinks);
-        sinks.forEach(Service::interrupt);
-        log("All running services stopped");
+        sinks.forEach(Service::requestStop);
+    }
+
+    /**
+     * Request all {@link Service}s to terminate.
+     */
+    private void terminateAll() {
+        Set<Service> sinks = getSinks();
+        log("Stopping services: " + sinks);
+        sinks.forEach(Service::requestTerminate);
     }
 
     /**
@@ -230,7 +228,7 @@ class ServiceManager implements Runnable {
             log("Service " + serviceId + " doesn't exist.");
             return;
         }
-        service.interrupt();
+        service.requestStop();
     }
 
     /**
@@ -239,7 +237,7 @@ class ServiceManager implements Runnable {
      * for that to happen before terminating itself.
      */
     private void terminate() {
-        stopAll();
+        terminateAll();
         log("Waiting for running services before terminating...");
         for(Service service: services.values()) {
             try {
@@ -282,13 +280,13 @@ class ServiceManager implements Runnable {
         String command = splittedMessage[0];
         String serviceId = splittedMessage.length > 1? splittedMessage[1] : "";
         switch (command) {
-            case "START-ALL":
+            case "RESUME-ALL":
                 runAll();
                 break;
             case "STOP-ALL":
                 stopAll();
                 break;
-            case "START-SERVICE":
+            case "RESUME-SERVICE":
                 runService(serviceId);
                 break;
             case "STOP-SERVICE":

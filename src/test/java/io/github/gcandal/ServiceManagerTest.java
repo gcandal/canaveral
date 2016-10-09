@@ -3,7 +3,8 @@ package io.github.gcandal;
 
 import org.junit.Test;
 
-import static org.hamcrest.CoreMatchers.hasItems;
+import static org.hamcrest.CoreMatchers.anyOf;
+import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
@@ -15,8 +16,7 @@ import java.util.concurrent.BlockingQueue;
 /**
  * Tests the {@link ServiceManager} class.
  */
-public class ServiceManagerTest
-{
+public class ServiceManagerTest {
     /**
      * Checks general {@link ServiceManager} initialization,
      * mainly if the {@link Service}s are well connected
@@ -24,25 +24,21 @@ public class ServiceManagerTest
      * @throws IOException When there was an error reading the file.
      */
     @Test
-    public void testInitServiceManager() throws IOException {
+    public void testParents() throws IOException {
         ServiceManager serviceManager = new ServiceManager("services.txt");
-
         Service a = serviceManager.getService("a"),
             b = serviceManager.getService("b"),
             c = serviceManager.getService("c"),
             d = serviceManager.getService("d"),
             e = serviceManager.getService("e");
 
-        /*
-        Check if the number of parents
-        is properly set
-        */
         Set<Service> expectedSources = new HashSet<>(),
                 expectedSinks = new HashSet<>();
         expectedSources.add(d);
         expectedSources.add(e);
         expectedSinks.add(a);
         expectedSinks.add(e);
+
         assertThat(serviceManager.getSources(), is(expectedSources));
         assertThat(serviceManager.getSinks(), is(expectedSinks));
 
@@ -51,8 +47,17 @@ public class ServiceManagerTest
         assertEquals(1, c.getIndegree());
         assertEquals(0, d.getIndegree());
         assertEquals(0, e.getIndegree());
+    }
 
-        // Check if the nodes are connected correctly
+    @Test
+    public void testChildren() throws IOException {
+        ServiceManager serviceManager = new ServiceManager("services.txt");
+        Service a = serviceManager.getService("a"),
+                b = serviceManager.getService("b"),
+                c = serviceManager.getService("c"),
+                d = serviceManager.getService("d"),
+                e = serviceManager.getService("e");
+
         Set<Service> expectedDependencies = new HashSet<>();
         assertThat(a.getDependencies(), is(expectedDependencies));
 
@@ -67,16 +72,6 @@ public class ServiceManagerTest
 
         expectedDependencies.clear();
         assertThat(e.getDependencies(), is(expectedDependencies));
-
-        /*
-        Check if the initialization latches
-        are shared properly among parent-child pairs
-         */
-        assertThat(a.getParentLatches(), hasItems(b.getStartLatch(), c.getStartLatch()));
-        assertThat(b.getParentLatches(), hasItems(d.getStartLatch()));
-        assertThat(c.getParentLatches(), hasItems(d.getStartLatch()));
-        assertEquals(0, d.getParentLatches().size());
-        assertEquals(0, e.getParentLatches().size());
     }
 
     /**
@@ -86,5 +81,30 @@ public class ServiceManagerTest
     @Test(expected = RuntimeException.class)
     public void testCyclicServiceManager() throws IOException {
         new ServiceManager("cyclic_services.txt");
+    }
+
+    @Test
+    public void testInvalidMessages() throws IOException, InterruptedException {
+        ServiceManager serviceManager = new ServiceManager("services.txt");
+        BlockingQueue<String> messageQueue = serviceManager.queue;
+        messageQueue.put("RESUME-SERVICE non-existing");
+        messageQueue.put("I'M NOT A VALID MESSAGE");
+        messageQueue.put("ME NEITHER");
+    }
+
+    @Test
+    public void testToString() throws IOException {
+        ServiceManager serviceManager = new ServiceManager("services.txt");
+        String option1 = "a (indegree = 2) (dependencies = [])\n" +
+                "b (indegree = 1) (dependencies = [a])\n" +
+                "c (indegree = 1) (dependencies = [a])\n" +
+                "d (indegree = 0) (dependencies = [c, b])\n" +
+                "e (indegree = 0) (dependencies = [])\n",
+                option2 = "a (indegree = 2) (dependencies = [])\n" +
+                    "b (indegree = 1) (dependencies = [a])\n" +
+                    "c (indegree = 1) (dependencies = [a])\n" +
+                    "d (indegree = 0) (dependencies = [b, c])\n" +
+                    "e (indegree = 0) (dependencies = [])\n";
+        assertThat(serviceManager.toString(), anyOf(equalTo(option1), equalTo(option2)));
     }
 }

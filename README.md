@@ -4,7 +4,7 @@ Draft of a Java service manager.
 
 ## Running
 
-Run the program with the name of the file containing as the first argument.
+Run the program with the name of the file containing as the first argument and then execute commands by writing to STDIN.
 
 ### Messages
 
